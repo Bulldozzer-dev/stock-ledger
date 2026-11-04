@@ -1,16 +1,216 @@
-'use strict';const $=id=>document.getElementById(id);let products=[],offset=0,total=0,historyToken=0;
-function el(tag,text){const e=document.createElement(tag);if(text!==undefined)e.textContent=text;return e;}
-function newId(){if(crypto.randomUUID)$('request').value=crypto.randomUUID();else{const b=new Uint8Array(16);crypto.getRandomValues(b);$('request').value=Array.from(b,x=>x.toString(16).padStart(2,'0')).join('');}}newId();
-async function request(path,body){const response=await fetch(path,body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),data=await response.json();if(!response.ok)throw Error(data.error||'Request failed.');return data;}
-function table(headers,rows){const t=el('table'),thead=el('thead'),tr=el('tr');headers.forEach(h=>{const th=el('th',h);th.scope='col';tr.append(th);});thead.append(tr);t.append(thead);const body=el('tbody');for(const values of rows){const row=el('tr');values.forEach(v=>row.append(el('td',v)));body.append(row);}t.append(body);return t;}
-function render(){const query=$('filter').value.trim().toLowerCase(),low=$('stock-filter').value==='low',rows=products.filter(p=>(!query||(p.sku+' '+p.name).toLowerCase().includes(query))&&(!low||p.stock<=p.reorder_level));$('inventory').replaceChildren();if(!rows.length)$('inventory').append(el('p','No products match this view.'));else $('inventory').append(table(['SKU','Product','On hand','Reorder level','Status'],rows.map(p=>[p.sku,p.name,p.stock,p.reorder_level,p.stock<=p.reorder_level?'Review stock':'In stock'])));$('stats').replaceChildren();for(const [v,l] of [[products.length,'Products'],[products.reduce((s,p)=>s+p.stock,0),'Units on hand'],[products.filter(p=>p.stock<=p.reorder_level).length,'At reorder level']]){const d=el('div');d.className='stat';d.append(el('strong',v),el('span',l));$('stats').append(d);}}
-function options(id,empty){const select=$(id),value=select.value;select.replaceChildren();const first=el('option',empty);first.value='';select.append(first);for(const p of products){const o=el('option',p.sku+' / '+p.name);o.value=p.sku;select.append(o);}if(products.some(p=>p.sku===value))select.value=value;}
-async function history(){const token=++historyToken,sku=$('history-sku').value,params=new URLSearchParams({limit:'20',offset:String(offset)});if(sku)params.set('sku',sku);const data=await request('/api/movements?'+params);if(token!==historyToken)return;total=data.total;$('history').replaceChildren();if(!data.movements.length)$('history').append(el('p','No movements in this view.'));else $('history').append(table(['Time (UTC)','SKU','Change','Reason','Request ID'],data.movements.map(m=>[m.created_at,m.sku,(m.delta>0?'+':'')+m.delta,m.reason,m.request_id])));$('previous').disabled=offset===0;$('next').disabled=offset+20>=total;$('page-info').textContent=total?`${offset+1}–${Math.min(offset+20,total)} of ${total}`:'0 movements';$('history-export').href='/api/export/movements.csv'+(sku?'?sku='+encodeURIComponent(sku):'');}
-async function refresh(){const d=await request('/api/state');products=d.products;options('move-sku','Choose a product');options('history-sku','All products');$('reconciliation').textContent=d.reconciliation_errors.length?'Ledger mismatch found. Investigate the database.':'Ledger check passed: balances match recorded movements.';$('reconciliation').className=d.reconciliation_errors.length?'error':'good';render();await history();}
-async function submit(e,path,data){e.preventDefault();const b=e.target.querySelector('button');b.disabled=true;try{const r=await request(path,data);$('message').textContent=r.replayed?'Already recorded. Stock was not changed again.':'Saved. Choose a new request ID for the next movement.';try{offset=0;await refresh();}catch{$('message').textContent+=' Refresh failed; the save succeeded. Retry refresh.';}}catch(e){$('message').textContent=e.message;}finally{b.disabled=false;}}
-$('product').addEventListener('submit',e=>submit(e,'/api/products',{sku:$('sku').value,name:$('name').value,reorder_level:Number($('reorder').value)}));
-$('movement').addEventListener('submit',e=>submit(e,'/api/movements',{sku:$('move-sku').value,delta:Number($('delta').value),reason:$('reason').value,request_id:$('request').value}));
-$('filter').addEventListener('input',render);$('stock-filter').addEventListener('change',render);$('new-id').addEventListener('click',newId);
-$('refresh').addEventListener('click',()=>refresh().catch(e=>$('message').textContent=e.message));$('history-sku').addEventListener('change',()=>{offset=0;history().catch(e=>$('message').textContent=e.message);});
-$('next').addEventListener('click',()=>{offset+=20;history().catch(e=>{offset=Math.max(0,offset-20);$('message').textContent=e.message;});});$('previous').addEventListener('click',()=>{offset=Math.max(0,offset-20);history().catch(e=>$('message').textContent=e.message);});
-refresh().then(()=>$('message').textContent='Ready. Create a product, receive stock, then record an issue.').catch(()=>$('message').textContent='Run python server.py and open the printed http://127.0.0.1 address. This application needs its local server.');
+"use strict";
+const $ = (id) => document.getElementById(id);
+let products = [],
+  offset = 0,
+  total = 0,
+  historyToken = 0;
+function el(tag, text) {
+  const e = document.createElement(tag);
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+function newId() {
+  if (crypto.randomUUID) $("request").value = crypto.randomUUID();
+  else {
+    const b = new Uint8Array(16);
+    crypto.getRandomValues(b);
+    $("request").value = Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+  }
+}
+newId();
+async function request(path, body) {
+  const response = await fetch(
+      path,
+      body === undefined
+        ? {}
+        : {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          },
+    ),
+    data = await response.json();
+  if (!response.ok) throw Error(data.error || "Request failed.");
+  return data;
+}
+function table(headers, rows) {
+  const t = el("table"),
+    thead = el("thead"),
+    tr = el("tr");
+  headers.forEach((h) => {
+    const th = el("th", h);
+    th.scope = "col";
+    tr.append(th);
+  });
+  thead.append(tr);
+  t.append(thead);
+  const body = el("tbody");
+  for (const values of rows) {
+    const row = el("tr");
+    values.forEach((v) => row.append(el("td", v)));
+    body.append(row);
+  }
+  t.append(body);
+  return t;
+}
+function render() {
+  const query = $("filter").value.trim().toLowerCase(),
+    low = $("stock-filter").value === "low",
+    rows = products.filter(
+      (p) =>
+        (!query || (p.sku + " " + p.name).toLowerCase().includes(query)) &&
+        (!low || p.stock <= p.reorder_level),
+    );
+  $("inventory").replaceChildren();
+  if (!rows.length) $("inventory").append(el("p", "No products match this view."));
+  else
+    $("inventory").append(
+      table(
+        ["SKU", "Product", "On hand", "Reorder level", "Status"],
+        rows.map((p) => [
+          p.sku,
+          p.name,
+          p.stock,
+          p.reorder_level,
+          p.stock <= p.reorder_level ? "Review stock" : "In stock",
+        ]),
+      ),
+    );
+  $("stats").replaceChildren();
+  for (const [v, l] of [
+    [products.length, "Products"],
+    [products.reduce((s, p) => s + p.stock, 0), "Units on hand"],
+    [products.filter((p) => p.stock <= p.reorder_level).length, "At reorder level"],
+  ]) {
+    const d = el("div");
+    d.className = "stat";
+    d.append(el("strong", v), el("span", l));
+    $("stats").append(d);
+  }
+}
+function options(id, empty) {
+  const select = $(id),
+    value = select.value;
+  select.replaceChildren();
+  const first = el("option", empty);
+  first.value = "";
+  select.append(first);
+  for (const p of products) {
+    const o = el("option", p.sku + " / " + p.name);
+    o.value = p.sku;
+    select.append(o);
+  }
+  if (products.some((p) => p.sku === value)) select.value = value;
+}
+async function history() {
+  const token = ++historyToken,
+    sku = $("history-sku").value,
+    params = new URLSearchParams({ limit: "20", offset: String(offset) });
+  if (sku) params.set("sku", sku);
+  const data = await request("/api/movements?" + params);
+  if (token !== historyToken) return;
+  total = data.total;
+  $("history").replaceChildren();
+  if (!data.movements.length)
+    $("history").append(el("p", "No movements in this view."));
+  else
+    $("history").append(
+      table(
+        ["Time (UTC)", "SKU", "Change", "Reason", "Request ID"],
+        data.movements.map((m) => [
+          m.created_at,
+          m.sku,
+          (m.delta > 0 ? "+" : "") + m.delta,
+          m.reason,
+          m.request_id,
+        ]),
+      ),
+    );
+  $("previous").disabled = offset === 0;
+  $("next").disabled = offset + 20 >= total;
+  $("page-info").textContent = total
+    ? `${offset + 1}–${Math.min(offset + 20, total)} of ${total}`
+    : "0 movements";
+  $("history-export").href =
+    "/api/export/movements.csv" + (sku ? "?sku=" + encodeURIComponent(sku) : "");
+}
+async function refresh() {
+  const d = await request("/api/state");
+  products = d.products;
+  options("move-sku", "Choose a product");
+  options("history-sku", "All products");
+  $("reconciliation").textContent = d.reconciliation_errors.length
+    ? "Ledger mismatch found. Investigate the database."
+    : "Ledger check passed: balances match recorded movements.";
+  $("reconciliation").className = d.reconciliation_errors.length ? "error" : "good";
+  render();
+  await history();
+}
+async function submit(e, path, data) {
+  e.preventDefault();
+  const b = e.target.querySelector("button");
+  b.disabled = true;
+  try {
+    const r = await request(path, data);
+    $("message").textContent = r.replayed
+      ? "Already recorded. Stock was not changed again."
+      : "Saved. Choose a new request ID for the next movement.";
+    try {
+      offset = 0;
+      await refresh();
+    } catch {
+      $("message").textContent += " Refresh failed; the save succeeded. Retry refresh.";
+    }
+  } catch (e) {
+    $("message").textContent = e.message;
+  } finally {
+    b.disabled = false;
+  }
+}
+$("product").addEventListener("submit", (e) =>
+  submit(e, "/api/products", {
+    sku: $("sku").value,
+    name: $("name").value,
+    reorder_level: Number($("reorder").value),
+  }),
+);
+$("movement").addEventListener("submit", (e) =>
+  submit(e, "/api/movements", {
+    sku: $("move-sku").value,
+    delta: Number($("delta").value),
+    reason: $("reason").value,
+    request_id: $("request").value,
+  }),
+);
+$("filter").addEventListener("input", render);
+$("stock-filter").addEventListener("change", render);
+$("new-id").addEventListener("click", newId);
+$("refresh").addEventListener("click", () =>
+  refresh().catch((e) => ($("message").textContent = e.message)),
+);
+$("history-sku").addEventListener("change", () => {
+  offset = 0;
+  history().catch((e) => ($("message").textContent = e.message));
+});
+$("next").addEventListener("click", () => {
+  offset += 20;
+  history().catch((e) => {
+    offset = Math.max(0, offset - 20);
+    $("message").textContent = e.message;
+  });
+});
+$("previous").addEventListener("click", () => {
+  offset = Math.max(0, offset - 20);
+  history().catch((e) => ($("message").textContent = e.message));
+});
+refresh()
+  .then(
+    () =>
+      ($("message").textContent =
+        "Ready. Create a product, receive stock, then record an issue."),
+  )
+  .catch(
+    () =>
+      ($("message").textContent =
+        "Run python server.py and open the printed http://127.0.0.1 address. This application needs its local server."),
+  );

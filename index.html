@@ -1,1 +1,154 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Receive stock, issue it safely and trace every change back to its request."><title>Every unit has a history. | Simon Wagathiru</title><link rel="stylesheet" href="style.css"></head><body><main><header><nav><a href="https://github.com/Bulldozzer-dev/stock-ledger">Simon Wagathiru / Every unit has a history.</a><span class="pill">Python + SQLite / local app</span></nav><h1>Every unit has a history.</h1><p>Receive stock, issue it safely and trace every change back to its request.</p></header><div class="stats" id="stats"><div class="stat"><strong>—</strong><span>Products</span></div><div class="stat"><strong>—</strong><span>Units on hand</span></div><div class="stat"><strong>—</strong><span>At reorder level</span></div></div><p id="message" role="status" aria-live="polite">Connecting to the local inventory server…</p><div class="grid"><form id="product" class="panel"><p class="eyebrow">CATALOGUE</p><h2>Add a product</h2><label for="sku">SKU</label><input id="sku" required maxlength="40" placeholder="BOOK-01"><label for="name">Product name</label><input id="name" required maxlength="120" placeholder="Exercise book"><label for="reorder">Reorder level (whole units)</label><input id="reorder" type="number" min="0" max="1000000" step="1" value="5" required><button>Create product</button></form><form id="movement" class="panel"><p class="eyebrow">RECEIVE / ISSUE</p><h2>Record a movement</h2><label for="move-sku">Product</label><select id="move-sku" required><option value="">Create a product first</option></select><label for="delta">Quantity change</label><input id="delta" type="number" required step="1" min="-1000000" max="1000000" value="10"><small>Positive receives stock. Negative issues it.</small><label for="reason">Reason</label><input id="reason" required maxlength="200" placeholder="Opening stock"><label for="request">Request ID</label><input id="request" required maxlength="100"><small>Keep this ID to retry the same request. Choose a new ID for a new movement.</small><button>Record movement</button><button type="button" class="secondary" id="new-id">New request ID</button></form></div><section class="panel"><p class="eyebrow">CURRENT POSITION</p><h2>Inventory</h2><div class="row"><div><label for="filter">Find a SKU or product</label><input id="filter" type="search" placeholder="Search inventory"></div><div><label for="stock-filter">Stock status</label><select id="stock-filter"><option value="all">All products</option><option value="low">At or below reorder level</option></select></div><button type="button" id="refresh" class="secondary">Refresh</button><a href="/api/export/products.csv" class="button secondary">Export inventory CSV</a></div><p id="reconciliation"></p><div id="inventory" class="scroll"></div></section><section class="panel"><p class="eyebrow">AUDIT TRAIL</p><h2>Movement history</h2><label for="history-sku">Filter by product</label><select id="history-sku"><option value="">All products</option></select><a id="history-export" href="/api/export/movements.csv" class="button secondary">Export matching history CSV</a><div id="history" class="scroll"></div><button type="button" id="previous" class="secondary" disabled>Previous</button><span id="page-info"></span><button type="button" id="next" class="secondary" disabled>Next</button></section><details class="panel"><summary>Why a repeated request does not change stock twice</summary><p>A write transaction locks before checking the balance. Stock and history commit together. Each movement has a unique request ID: an identical retry returns the original movement, while a conflicting retry is rejected. Negative stock is rejected. Reconciliation compares balances against recorded changes.</p><p>This application runs on your own computer, bound to 127.0.0.1. It has no accounts or deployment hardening. History can be altered by someone with database access. Whole units only; no payments or inventory valuation. See the README for backup, restore and API documentation.</p></details><footer><p>Built with AI coding assistance. Sample data is fictional. <a href="https://github.com/Bulldozzer-dev/stock-ledger">Source, tests and design notes ↗</a></p></footer></main><script src="app.js"></script></body></html>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      name="description"
+      content="Receive stock, issue it safely and trace every change back to its request."
+    />
+    <title>Every unit has a history. | Simon Wagathiru</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <nav>
+          <a href="https://github.com/Bulldozzer-dev/stock-ledger"
+            >Simon Wagathiru / Every unit has a history.</a
+          ><span class="pill">Python + SQLite / local app</span>
+        </nav>
+        <h1>Every unit has a history.</h1>
+        <p>
+          Receive stock, issue it safely and trace every change back to its request.
+        </p>
+      </header>
+      <div class="stats" id="stats">
+        <div class="stat"><strong>—</strong><span>Products</span></div>
+        <div class="stat"><strong>—</strong><span>Units on hand</span></div>
+        <div class="stat"><strong>—</strong><span>At reorder level</span></div>
+      </div>
+      <p id="message" role="status" aria-live="polite">
+        Connecting to the local inventory server…
+      </p>
+      <div class="grid">
+        <form id="product" class="panel">
+          <p class="eyebrow">CATALOGUE</p>
+          <h2>Add a product</h2>
+          <label for="sku">SKU</label
+          ><input id="sku" required maxlength="40" placeholder="BOOK-01" /><label
+            for="name"
+            >Product name</label
+          ><input
+            id="name"
+            required
+            maxlength="120"
+            placeholder="Exercise book"
+          /><label for="reorder">Reorder level (whole units)</label
+          ><input
+            id="reorder"
+            type="number"
+            min="0"
+            max="1000000"
+            step="1"
+            value="5"
+            required
+          /><button>Create product</button>
+        </form>
+        <form id="movement" class="panel">
+          <p class="eyebrow">RECEIVE / ISSUE</p>
+          <h2>Record a movement</h2>
+          <label for="move-sku">Product</label
+          ><select id="move-sku" required>
+            <option value="">Create a product first</option></select
+          ><label for="delta">Quantity change</label
+          ><input
+            id="delta"
+            type="number"
+            required
+            step="1"
+            min="-1000000"
+            max="1000000"
+            value="10"
+          /><small>Positive receives stock. Negative issues it.</small
+          ><label for="reason">Reason</label
+          ><input
+            id="reason"
+            required
+            maxlength="200"
+            placeholder="Opening stock"
+          /><label for="request">Request ID</label
+          ><input id="request" required maxlength="100" /><small
+            >Keep this ID to retry the same request. Choose a new ID for a new
+            movement.</small
+          ><button>Record movement</button
+          ><button type="button" class="secondary" id="new-id">New request ID</button>
+        </form>
+      </div>
+      <section class="panel">
+        <p class="eyebrow">CURRENT POSITION</p>
+        <h2>Inventory</h2>
+        <div class="row">
+          <div>
+            <label for="filter">Find a SKU or product</label
+            ><input id="filter" type="search" placeholder="Search inventory" />
+          </div>
+          <div>
+            <label for="stock-filter">Stock status</label
+            ><select id="stock-filter">
+              <option value="all">All products</option>
+              <option value="low">At or below reorder level</option>
+            </select>
+          </div>
+          <button type="button" id="refresh" class="secondary">Refresh</button
+          ><a href="/api/export/products.csv" class="button secondary"
+            >Export inventory CSV</a
+          >
+        </div>
+        <p id="reconciliation"></p>
+        <div id="inventory" class="scroll"></div>
+      </section>
+      <section class="panel">
+        <p class="eyebrow">AUDIT TRAIL</p>
+        <h2>Movement history</h2>
+        <label for="history-sku">Filter by product</label
+        ><select id="history-sku">
+          <option value="">All products</option></select
+        ><a
+          id="history-export"
+          href="/api/export/movements.csv"
+          class="button secondary"
+          >Export matching history CSV</a
+        >
+        <div id="history" class="scroll"></div>
+        <button type="button" id="previous" class="secondary" disabled>Previous</button
+        ><span id="page-info"></span
+        ><button type="button" id="next" class="secondary" disabled>Next</button>
+      </section>
+      <details class="panel">
+        <summary>Why a repeated request does not change stock twice</summary>
+        <p>
+          A write transaction locks before checking the balance. Stock and history
+          commit together. Each movement has a unique request ID: an identical retry
+          returns the original movement, while a conflicting retry is rejected. Negative
+          stock is rejected. Reconciliation compares balances against recorded changes.
+        </p>
+        <p>
+          This application runs on your own computer, bound to 127.0.0.1. It has no
+          accounts or deployment hardening. History can be altered by someone with
+          database access. Whole units only; no payments or inventory valuation. See the
+          README for backup, restore and API documentation.
+        </p>
+      </details>
+      <footer>
+        <p>
+          Built with AI coding assistance. Sample data is fictional.
+          <a href="https://github.com/Bulldozzer-dev/stock-ledger"
+            >Source, tests and design notes ↗</a
+          >
+        </p>
+      </footer>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>
