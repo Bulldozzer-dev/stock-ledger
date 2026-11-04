@@ -22,6 +22,12 @@ def connect(path):
     db=sqlite3.connect(str(path), timeout=5)
     db.row_factory=sqlite3.Row
     db.executescript(SCHEMA)
+    # Migrate the earlier prototype without dropping products or movements.
+    if 'reorder_level' not in {r['name'] for r in db.execute('PRAGMA table_info(products)')}:
+        try:
+            with db: db.execute('ALTER TABLE products ADD COLUMN reorder_level INTEGER NOT NULL DEFAULT 0 CHECK(reorder_level >= 0)')
+        except sqlite3.OperationalError:
+            if 'reorder_level' not in {r['name'] for r in db.execute('PRAGMA table_info(products)')}: raise
     return db
 
 def text(value, label, maximum):
@@ -29,13 +35,14 @@ def text(value, label, maximum):
         raise ValueError(f'{label} must contain 1–{maximum} characters.')
     return value.strip()
 
-def add_product(db, sku, name):
+def add_product(db, sku, name, reorder_level=0):
     sku=text(sku,'SKU',40); name=text(name,'Name',120)
+    if type(reorder_level) is not int or not 0<=reorder_level<=1000000: raise ValueError('Reorder level must be a whole number from 0 to 1000000.')
     try:
-        with db: db.execute('INSERT INTO products(sku,name) VALUES (?,?)',(sku,name))
+        with db: db.execute('INSERT INTO products(sku,name,reorder_level) VALUES (?,?,?)',(sku,name,reorder_level))
     except sqlite3.IntegrityError as error:
         raise ValueError('That SKU already exists.') from error
-    return {'sku':sku,'name':name,'stock':0}
+    return {'sku':sku,'name':name,'stock':0,'reorder_level':reorder_level}
 
 def move(db, sku, delta, reason, request_id):
     sku=text(sku,'SKU',40);reason=text(reason,'Reason',200);request_id=text(request_id,'Request ID',100)
@@ -69,3 +76,23 @@ def snapshot(db):
 def reconcile(db):
     rows=db.execute('SELECT p.sku,p.stock,COALESCE(SUM(m.delta),0) AS recorded FROM products p LEFT JOIN movements m ON m.sku=p.sku GROUP BY p.sku ORDER BY p.sku')
     return [dict(r) for r in rows if r['stock']!=r['recorded']]
+
+def history(db, sku=None, limit=20, offset=0):
+    if type(limit) is not int or not 1<=limit<=100 or type(offset) is not int or not 0<=offset<=10000000:
+        raise ValueError('Use limit 1–100 and offset 0–10000000.')
+    params=[];where=''
+    if sku is not None:
+        sku=text(sku,'SKU',40);where=' WHERE sku=?';params=[sku]
+    total=db.execute('SELECT COUNT(*) FROM movements'+where,params).fetchone()[0]
+    rows=db.execute('SELECT * FROM movements'+where+' ORDER BY id DESC LIMIT ? OFFSET ?',params+[limit,offset])
+    return {'movements':[dict(r) for r in rows],'total':total,'limit':limit,'offset':offset}
+
+def inventory(db):
+    # Read the catalogue and reconciliation within one snapshot under concurrent writes.
+    db.execute('BEGIN')
+    try:
+        products=[dict(r) for r in db.execute('SELECT * FROM products ORDER BY sku')]
+        errors=reconcile(db);db.commit()
+        return {'products':products,'reconciliation_errors':errors}
+    except Exception:
+        db.rollback();raise
